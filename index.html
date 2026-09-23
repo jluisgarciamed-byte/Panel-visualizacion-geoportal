@@ -6,10 +6,6 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Tablero de participación · PMDUOET 2050 · IMPLAN San Francisco del Rincón</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -710,14 +706,104 @@ table.datos tfoot td{position:sticky;bottom:0;background:var(--panel-2);font-fam
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
-
 <script>
+/* ============================================================================
+   CARGA DE LIBRERÍAS CON RESPALDO
+   Si unpkg.com no responde en alguna red (p. ej. datos móviles), Leaflet no
+   llegaba y el tablero se quedaba en «Preparando el tablero…» sin decir por
+   qué. Ahora cada
+   librería se pide primero a la carpeta lib/ del mismo repositorio (si GitHub
+   Pages abre, esto también abre) y después a tres CDN distintos. Si ninguna
+   fuente responde, la pantalla de carga dice cuál faltó.
+   ============================================================================ */
+(function () {
+  const CDN = ruta => [`https://cdn.jsdelivr.net/npm/${ruta}`, `https://unpkg.com/${ruta}`];
+  const CDNJS = ruta => `https://cdnjs.cloudflare.com/ajax/libs/${ruta}`;
+
+  const HOJAS = [
+    ['lib/leaflet/leaflet.css', CDNJS('leaflet/1.9.4/leaflet.min.css'), ...CDN('leaflet@1.9.4/dist/leaflet.css')],
+    ['lib/markercluster/MarkerCluster.css', CDNJS('leaflet.markercluster/1.5.3/MarkerCluster.min.css'),
+      ...CDN('leaflet.markercluster@1.5.3/dist/MarkerCluster.css')],
+    ['lib/markercluster/MarkerCluster.Default.css', CDNJS('leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css'),
+      ...CDN('leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css')],
+    ['lib/draw/leaflet.draw.css', CDNJS('leaflet.draw/1.0.4/leaflet.draw.css'), ...CDN('leaflet-draw@1.0.4/dist/leaflet.draw.css')]
+  ];
+  const LEAFLET = [
+    { nombre:'Leaflet', listo:() => window.L && window.L.version,
+      urls:['lib/leaflet/leaflet.js', CDNJS('leaflet/1.9.4/leaflet.min.js'), ...CDN('leaflet@1.9.4/dist/leaflet.js')] },
+    { nombre:'Leaflet.markercluster', listo:() => window.L && window.L.markerClusterGroup,
+      urls:['lib/markercluster/leaflet.markercluster.js', CDNJS('leaflet.markercluster/1.5.3/leaflet.markercluster.js'),
+            ...CDN('leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js')] },
+    { nombre:'Leaflet.heat', listo:() => window.L && window.L.heatLayer,
+      urls:['lib/heat/leaflet-heat.js', CDNJS('leaflet.heat/0.2.0/leaflet-heat.js'), ...CDN('leaflet.heat@0.2.0/dist/leaflet-heat.js')] },
+    { nombre:'Leaflet.draw', listo:() => window.L && window.L.Draw,
+      urls:['lib/draw/leaflet.draw.js', CDNJS('leaflet.draw/1.0.4/leaflet.draw.js'), ...CDN('leaflet-draw@1.0.4/dist/leaflet.draw.js')] }
+  ];
+  const SUELTAS = [
+    { nombre:'Chart.js', listo:() => window.Chart,
+      urls:['lib/chartjs/chart.umd.js', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+            CDNJS('Chart.js/4.4.1/chart.umd.js'), 'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js'] },
+    { nombre:'Turf', listo:() => window.turf,
+      urls:['lib/turf/turf.min.js', ...CDN('@turf/turf@6.5.0/turf.min.js'), CDNJS('Turf.js/6.5.0/turf.min.js')] }
+  ];
+
+  /* Las hojas van ANTES del primer <style> para que los ajustes del tablero
+     (popups, controles oscuros) sigan ganando sobre los estilos de Leaflet. */
+  const anclaEstilos = document.querySelector('style');
+  HOJAS.forEach(urls => {
+    let i = 0, lista = false;
+    const probar = () => {
+      if (lista || i >= urls.length) return;
+      const l = document.createElement('link');
+      l.rel = 'stylesheet'; l.href = urls[i++];
+      const espera = setTimeout(() => { if (!lista) probar(); }, 8000);
+      l.onload = () => { lista = true; clearTimeout(espera); };
+      l.onerror = () => { clearTimeout(espera); l.remove(); probar(); };
+      document.head.insertBefore(l, anclaEstilos);
+    };
+    probar();
+  });
+
+  const pedir = (url, ms) => new Promise((ok, mal) => {
+    const s = document.createElement('script');
+    let hecho = false;
+    const fin = (bien) => { if (hecho) return; hecho = true; clearTimeout(t); bien ? ok() : (s.remove(), mal()); };
+    const t = setTimeout(() => fin(false), ms);
+    s.onload = () => fin(true);
+    s.onerror = () => fin(false);
+    s.src = url;
+    document.head.appendChild(s);
+  });
+  async function cargar(lib) {
+    for (const url of lib.urls) {
+      if (lib.listo()) return;
+      try { await pedir(url, 20000); } catch (e) {}
+      if (lib.listo()) return;
+    }
+    throw new Error(lib.nombre);
+  }
+  async function cadena(libs) { for (const lib of libs) await cargar(lib); }
+
+  Promise.allSettled([cadena(LEAFLET), ...SUELTAS.map(cargar)]).then(res => {
+    const faltan = res.filter(r => r.status === 'rejected').map(r => r.reason.message);
+    if (faltan.length) {
+      const c = document.getElementById('cargando');
+      c.querySelector('.giro').style.display = 'none';
+      document.getElementById('cargando-texto').innerHTML =
+        `No se pudo descargar: <b>${faltan.join(', ')}</b>.<br>
+         <span style="font-size:12px;color:var(--texto-tenue)">Revise la conexión y recargue la página.
+         Si persiste, suba la carpeta lib/ al repositorio.</span>`;
+      document.getElementById('cargando-texto').style.textAlign = 'center';
+      return;
+    }
+    const principal = document.createElement('script');
+    principal.textContent = document.getElementById('codigo-principal').textContent;
+    document.body.appendChild(principal);
+  });
+})();
+</script>
+
+<script type="text/plain" id="codigo-principal">
 /* ============================================================================
    PARTE A — CONFIGURACIÓN, CATÁLOGO, CARGA Y UNIÓN DE DATOS
    ============================================================================ */
@@ -3663,7 +3749,8 @@ async function iniciar() {
       `<div class="aviso"><b>No se pudieron leer los datos.</b><br>${esc(e.message)}<br><br>
        Revise que las políticas RLS de <code>participacion_pmduoet</code> y
        <code>problemas_pmduoet</code> permitan SELECT con la llave anónima, y que haya
-       conexión a internet.</div>`;
+       conexión a internet. Si solo falla con datos móviles, la red del operador no está
+       alcanzando <code>supabase.co</code>.</div>`;
     return;
   }
   cargando('Preparando el tablero…');
@@ -3715,3 +3802,4 @@ iniciar();
 </script>
 </body>
 </html>
+
